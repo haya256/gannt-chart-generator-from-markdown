@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gantt Chart Generator</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4/dist/js-yaml.min.js"></script>
+  <script src="gantt.js"></script>
+</head>
+<body>
+
+<header class="app-header">
+  <h1>📅 Gantt Chart Generator</h1>
+  <span class="subtitle">YAML → ガントチャート</span>
+</header>
+
+<div class="app-body">
+
+  <!-- ── Sidebar ───────────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <div class="sidebar-section">
+      <h2>YAMLを読み込む</h2>
+      <label class="upload-zone" id="drop-zone">
+        <input type="file" id="file-input" accept=".yaml,.yml">
+        <div class="icon">📂</div>
+        <div>クリックまたはドロップ</div>
+        <div class="hint">.yaml / .yml ファイル</div>
+      </label>
+      <div id="status" class="status"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <h2>YAMLを直接入力</h2>
+      <textarea class="yaml-paste" id="yaml-paste" placeholder="YAMLをここに貼り付け..."></textarea>
+      <button class="btn btn-parse" id="btn-parse">▶ 描画</button>
+    </div>
+
+    <div class="sidebar-section">
+      <h2>表示設定</h2>
+
+      <div class="form-row">
+        <label for="sel-unit">時間単位</label>
+        <select id="sel-unit">
+          <option value="week" selected>週</option>
+          <option value="month">月</option>
+          <option value="day">日</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label for="sel-theme">カラーテーマ</label>
+        <select id="sel-theme">
+          <option value="blue" selected>ブルー</option>
+          <option value="green">グリーン</option>
+          <option value="warm">ウォーム</option>
+          <option value="dark">ダーク</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label for="sel-layout">レイアウト</label>
+        <select id="sel-layout">
+          <option value="expanded" selected>展開（タスクごとに行）</option>
+          <option value="compact">コンパクト（フェーズごとに行）</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label for="rng-scale">列幅スケール</label>
+        <input type="range" id="rng-scale" min="50" max="300" value="100" step="10">
+        <div class="range-labels"><span>狭い</span><span>広い</span></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h2>エクスポート</h2>
+      <button class="btn btn-export" id="btn-svg">⬇ SVG ダウンロード</button>
+      <button class="btn btn-export" id="btn-html">⬇ HTML ダウンロード</button>
+      <button class="btn btn-export" id="btn-png">⬇ PNG ダウンロード</button>
+    </div>
+
+  </aside>
+
+  <!-- ── Chart area ─────────────────────────────────────────────────────── -->
+  <main class="chart-area" id="chart-area">
+    <div class="chart-wrap" id="chart-wrap">
+      <div class="chart-empty">
+        <div class="icon">📊</div>
+        <p>YAMLファイルを読み込むか、左のテキストエリアに貼り付けてください</p>
+        <small>サンプル: <code>../sample/sample-output.yaml</code></small>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var currentSpec = null;
+  var svgString = '';
+
+  // ── Settings ───────────────────────────────────────────────────────────────
+  function getOpts() {
+    var unit = document.getElementById('sel-unit').value;
+    var theme = document.getElementById('sel-theme').value;
+    var scale = parseInt(document.getElementById('rng-scale').value, 10) / 100;
+    var compact = document.getElementById('sel-layout').value === 'compact';
+    var BASE = { day: 24, week: 10, month: 3.8 };
+    return { unit: unit, theme: theme, pxPerDay: BASE[unit] * scale, compact: compact };
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  function renderChart(spec) {
+    currentSpec = spec;
+    var opts = getOpts();
+    // honour spec's unit if set
+    if (spec.display && spec.display.unit && !document.getElementById('sel-unit')._userChanged) {
+      document.getElementById('sel-unit').value = spec.display.unit;
+      opts.unit = spec.display.unit;
+    }
+    try {
+      svgString = GanttChart.render(spec, opts);
+      var wrap = document.getElementById('chart-wrap');
+      wrap.innerHTML = svgString;
+    } catch (e) {
+      showStatus('描画エラー: ' + e.message, true);
+    }
+  }
+
+  function rerender() {
+    if (currentSpec) renderChart(currentSpec);
+  }
+
+  // ── YAML parse ────────────────────────────────────────────────────────────
+  function loadYaml(text) {
+    try {
+      var spec = jsyaml.load(text);
+      if (!spec || typeof spec !== 'object') throw new Error('YAMLが空またはオブジェクトではありません');
+      if (!spec.title) spec.title = '無題プロジェクト';
+      showStatus('読み込み完了: ' + (spec.title || ''), false);
+      renderChart(spec);
+    } catch (e) {
+      showStatus('YAMLエラー: ' + e.message, true);
+    }
+  }
+
+  // ── Status ────────────────────────────────────────────────────────────────
+  function showStatus(msg, isErr) {
+    var el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = 'status ' + (isErr ? 'err' : 'ok');
+  }
+
+  // ── File upload ───────────────────────────────────────────────────────────
+  var fileInput = document.getElementById('file-input');
+  var dropZone = document.getElementById('drop-zone');
+
+  fileInput.addEventListener('change', function () {
+    if (!this.files[0]) return;
+    var reader = new FileReader();
+    reader.onload = function (e) { loadYaml(e.target.result); };
+    reader.readAsText(this.files[0]);
+  });
+
+  dropZone.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    this.classList.add('drag-over');
+  });
+  dropZone.addEventListener('dragleave', function () {
+    this.classList.remove('drag-over');
+  });
+  dropZone.addEventListener('drop', function (e) {
+    e.preventDefault();
+    this.classList.remove('drag-over');
+    var file = e.dataTransfer.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) { loadYaml(ev.target.result); };
+    reader.readAsText(file);
+  });
+
+  // ── Paste render ──────────────────────────────────────────────────────────
+  document.getElementById('btn-parse').addEventListener('click', function () {
+    var text = document.getElementById('yaml-paste').value.trim();
+    if (!text) return showStatus('YAMLが入力されていません', true);
+    loadYaml(text);
+  });
+
+  // ── Settings change ───────────────────────────────────────────────────────
+  document.getElementById('sel-unit').addEventListener('change', function () {
+    this._userChanged = true;
+    rerender();
+  });
+  document.getElementById('sel-theme').addEventListener('change', rerender);
+  document.getElementById('sel-layout').addEventListener('change', rerender);
+  document.getElementById('rng-scale').addEventListener('input', rerender);
+
+  // ── Export helpers ────────────────────────────────────────────────────────
+  function download(filename, blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); document.body.removeChild(a); }, 1000);
+  }
+
+  function currentFilename() {
+    return (currentSpec && currentSpec.title
+      ? currentSpec.title.replace(/[\\/:*?"<>|]/g, '_')
+      : 'gantt');
+  }
+
+  // SVG export
+  document.getElementById('btn-svg').addEventListener('click', function () {
+    if (!svgString) return showStatus('先にYAMLを読み込んでください', true);
+    download(currentFilename() + '.svg', new Blob([svgString], { type: 'image/svg+xml' }));
+  });
+
+  // HTML export (self-contained)
+  document.getElementById('btn-html').addEventListener('click', function () {
+    if (!svgString) return showStatus('先にYAMLを読み込んでください', true);
+    var html = '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">'
+      + '<title>' + (currentSpec ? currentSpec.title : 'Gantt') + '</title>'
+      + '<style>body{margin:0;background:#f0f4f8;display:flex;justify-content:center;padding:20px}'
+      + '.wrap{background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.12);overflow:auto;display:inline-block}</style>'
+      + '</head><body><div class="wrap">' + svgString + '</div></body></html>';
+    download(currentFilename() + '.html', new Blob([html], { type: 'text/html' }));
+  });
+
+  // PNG export via Canvas
+  document.getElementById('btn-png').addEventListener('click', function () {
+    if (!svgString) return showStatus('先にYAMLを読み込んでください', true);
+
+    var svgEl = document.querySelector('#chart-wrap svg');
+    if (!svgEl) return showStatus('SVGが見つかりません', true);
+
+    var W = parseFloat(svgEl.getAttribute('width'));
+    var H = parseFloat(svgEl.getAttribute('height'));
+    var dpr = 2; // retina
+
+    var canvas = document.createElement('canvas');
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    var blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var img = new Image();
+    img.onload = function () {
+      ctx.drawImage(img, 0, 0, W, H);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(function (pngBlob) {
+        download(currentFilename() + '.png', pngBlob);
+      }, 'image/png');
+    };
+    img.onerror = function () {
+      URL.revokeObjectURL(url);
+      showStatus('PNG変換に失敗しました', true);
+    };
+    img.src = url;
+  });
+
+})();
+</script>
+
+</body>
+</html>

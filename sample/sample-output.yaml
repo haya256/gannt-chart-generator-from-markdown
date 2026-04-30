@@ -1,0 +1,124 @@
+title: "ECサイトリニューアルプロジェクト"
+description: "自社ECサイトフルリニューアル（6月〜8月末）"
+display:
+  unit: week
+  start: "2026-06-01"
+  end: "2026-08-31"
+
+groups:
+  - id: phase1
+    name: "フェーズ1: 要件定義・設計"
+    color: "#2c5f8a"
+  - id: phase2
+    name: "フェーズ2: 開発"
+    color: "#276749"
+  - id: phase3
+    name: "フェーズ3: テスト・リリース"
+    color: "#744210"
+
+tasks:
+  - id: t01
+    name: "キックオフMTG"
+    group: phase1
+    start: "2026-06-01"
+    end: "2026-06-01"
+    dependencies: []
+    note: "6月第1週（月曜）。1日で完了"
+
+  - id: t02
+    name: "現行システム調査"
+    group: phase1
+    start: "2026-06-08"
+    end: "2026-06-19"
+    dependencies: [t01]
+    note: "キックオフ翌週から2週間（1〜2週間 → 2週間として計上）"
+
+  - id: t03
+    name: "要件定義"
+    group: phase1
+    start: "2026-06-22"
+    end: "2026-07-03"
+    dependencies: [t02]
+    note: "現行調査完了後、約2週間"
+
+  - id: t04
+    name: "UI/UXデザイン"
+    group: phase1
+    start: "2026-06-22"
+    end: "2026-07-03"
+    dependencies: [t01]
+    note: "要件定義と並行して約2週間"
+
+  - id: t05
+    name: "技術選定・アーキテクチャ設計"
+    group: phase1
+    start: "2026-07-06"
+    end: "2026-07-10"
+    dependencies: [t03]
+    note: "要件定義完了後1週間"
+
+  - id: t06
+    name: "DB設計・構築"
+    group: phase2
+    start: "2026-07-06"
+    end: "2026-07-17"
+    dependencies: [t05]
+    note: "7月初旬の2週間（t05と並行してスタート可）"
+
+  - id: t07
+    name: "バックエンドAPI開発"
+    group: phase2
+    start: "2026-07-06"
+    end: "2026-08-14"
+    dependencies: [t05]
+    note: "DB設計と並行してスタート。約6週間"
+
+  - id: t08
+    name: "フロントエンド開発"
+    group: phase2
+    start: "2026-07-06"
+    end: "2026-08-07"
+    dependencies: [t04, t05]
+    note: "デザイン承認後スタート。約5週間"
+
+  - id: t09
+    name: "結合テスト"
+    group: phase3
+    start: "2026-08-10"
+    end: "2026-08-21"
+    dependencies: [t07, t08]
+    note: "8月第2週から2週間"
+
+  - id: t10
+    name: "UAT"
+    group: phase3
+    start: "2026-08-24"
+    end: "2026-08-28"
+    dependencies: [t09]
+    note: "結合テスト完了後すぐ。約1週間"
+
+  - id: t11
+    name: "本番リリース"
+    group: phase3
+    start: "2026-08-31"
+    end: "2026-08-31"
+    dependencies: [t10]
+    note: "8月末"
+
+milestones:
+  - id: m1
+    name: "要件確定"
+    date: "2026-07-03"
+    group: phase1
+  - id: m2
+    name: "デザイン承認"
+    date: "2026-07-03"
+    group: phase1
+  - id: m3
+    name: "開発完了"
+    date: "2026-08-14"
+    group: phase2
+  - id: m4
+    name: "リリース"
+    date: "2026-08-31"
+    group: phase3
