@@ -61,6 +61,7 @@ body {
 
 /* Upload zone */
 .upload-zone {
+  display: block;
   border: 2px dashed #bee3f8;
   border-radius: 8px;
   padding: 20px 12px;
@@ -113,6 +114,40 @@ select:focus { border-color: #4299e1; }
 
 input[type="range"] {
   accent-color: #4299e1;
+  cursor: pointer;
+}
+
+.check-group {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.check-group label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #4a5568;
+  cursor: pointer;
+}
+.check-group input[type="checkbox"] {
+  accent-color: #4299e1;
+  cursor: pointer;
+}
+
+.form-row-check label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: normal;
+  color: #4a5568;
+  cursor: pointer;
+}
+.form-row-check input[type="checkbox"] {
+  accent-color: #4299e1;
+  width: 14px;
+  height: 14px;
   cursor: pointer;
 }
 
@@ -226,6 +261,23 @@ input[type="range"] {
 .chart-empty .icon { font-size: 48px; }
 .chart-empty p { font-size: 14px; }
 .chart-empty small { font-size: 12px; color: #cbd5e0; }
+
+/* ── Tooltip ─────────────────────────────────────────────────────────────── */
+#tooltip {
+  display: none;
+  position: fixed;
+  background: #1a202c;
+  color: #f7fafc;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-line;
+  pointer-events: none;
+  z-index: 9999;
+  box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  max-width: 260px;
+}
 
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 640px) {

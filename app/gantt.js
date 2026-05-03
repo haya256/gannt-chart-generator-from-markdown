@@ -5,6 +5,7 @@
   // ── Layout constants ───────────────────────────────────────────────────────
   const L = {
     LEFT_W: 230,
+    DATE_COL_W: 90,
     ROW_H: 36,
     GROUP_H: 40,
     HEADER_H: 54,
@@ -179,12 +180,22 @@
     return { assignments: assignments, numLanes: Math.max(laneEnds.length, 1) };
   }
 
+  function buildTip(name, start, end, note) {
+    var parts = [name];
+    if (start && end && start !== end) parts.push(start + ' 〜 ' + end);
+    else if (start) parts.push(start);
+    if (note) parts.push(note);
+    return parts.join('\n');
+  }
+
   // ── Main render function ───────────────────────────────────────────────────
   function render(spec, opts) {
     opts = opts || {};
     const theme = THEMES[opts.theme] || THEMES.blue;
-    const unit = (spec.display && spec.display.unit) || opts.unit || 'week';
+    const unit = opts.unit || (spec.display && spec.display.unit) || 'week';
     const pxPerDay = opts.pxPerDay || PX_PER_DAY[unit] || PX_PER_DAY.week;
+    var showDates  = !!opts.showDates;
+    var leftTotalW = L.LEFT_W + (showDates ? L.DATE_COL_W : 0);
 
     // Group map
     const groupMap = {};
@@ -208,23 +219,25 @@
     } else {
       var starts = tasks.map(function (t) { return t._start; }).concat(milestones.map(function (m) { return m._date; })).filter(Boolean);
       dispStart = starts.length ? new Date(Math.min.apply(null, starts)) : new Date();
-      dispStart = addDays(dispStart, -3);
     }
     if (spec.display && spec.display.end) {
       dispEnd = parseDate(spec.display.end);
     } else {
       var ends = tasks.map(function (t) { return t._end; }).concat(milestones.map(function (m) { return m._date; })).filter(Boolean);
       dispEnd = ends.length ? new Date(Math.max.apply(null, ends)) : addDays(dispStart, 30);
-      dispEnd = addDays(dispEnd, 3);
     }
 
-    // Snap start
+    // Always add padding so bars don't hit the edge, then snap
+    var padDays = unit === 'day' ? 4 : unit === 'month' ? 31 : 7;
+    dispStart = addDays(dispStart, -padDays);
+    dispEnd   = addDays(dispEnd,   padDays);
+
     if (unit === 'week') dispStart = startOfWeek(dispStart);
     else if (unit === 'month') dispStart = startOfMonth(dispStart);
 
     var totalDays = daysBetween(dispStart, dispEnd);
     var chartW = Math.ceil(totalDays * pxPerDay);
-    var svgW = L.LEFT_W + chartW;
+    var svgW = leftTotalW + chartW;
 
     // Build rows
     var tasksByGroup = {};
@@ -278,10 +291,24 @@
       if (r.type === 'compact') return s + r.h;
       return s + (r.type === 'group' ? L.GROUP_H : L.ROW_H);
     }, 0);
-    var svgH = L.TITLE_H + L.HEADER_H + rowsH;
+
+    // Dynamic header height based on visible rows
+    var HROW = 22;
+    var showYear  = opts.showYear  !== false;
+    var showMonth = opts.showMonth !== false;
+    var showWeek  = opts.showWeek  !== false;
+    var showDay   = opts.showDay   !== false;
+    var showDow   = !!opts.showDow;
+    var headerH = ((showYear ? 1 : 0) + (showMonth ? 1 : 0) + (showWeek ? 1 : 0) + (showDay ? 1 : 0) + (showDow ? 1 : 0)) * HROW || 4;
+
+    var svgH = L.TITLE_H + headerH + rowsH;
 
     function xDate(d) {
-      return L.LEFT_W + daysBetween(dispStart, d) * pxPerDay;
+      return leftTotalW + daysBetween(dispStart, d) * pxPerDay;
+    }
+
+    function shortDate(d) {
+      return d ? (d.getMonth() + 1) + '/' + d.getDate() : '';
     }
 
     // ── SVG assembly ──────────────────────────────────────────────────────────
@@ -297,10 +324,13 @@
     p.push('<marker id="gantt-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">'
       + '<path d="M0,0 L0,6 L8,3 z" fill="' + theme.depStroke + '"/></marker>');
     p.push('<clipPath id="gantt-chart">'
-      + rect(L.LEFT_W, 0, chartW, svgH, {})
+      + rect(leftTotalW, 0, chartW, svgH, {})
       + '</clipPath>');
     p.push('<clipPath id="gantt-left">'
       + rect(0, 0, L.LEFT_W - 1, svgH, {})
+      + '</clipPath>');
+    p.push('<clipPath id="gantt-date">'
+      + rect(L.LEFT_W, 0, L.DATE_COL_W - 1, svgH, {})
       + '</clipPath>');
     p.push('</defs>');
 
@@ -321,82 +351,24 @@
       }));
     }
 
-    // ── Timeline header ───────────────────────────────────────────────────────
+    // ── Timeline header (3 toggleable rows: year / month / day) ──────────────
     var hY = L.TITLE_H;
-    var topH = Math.round(L.HEADER_H * 0.44);
-    var botH = L.HEADER_H - topH;
+    p.push(rect(0, hY, svgW, headerH, { fill: theme.headerBg }));
 
-    p.push(rect(0, hY, svgW, L.HEADER_H, { fill: theme.headerBg }));
+    var hy = hY; // advances as each visible row is rendered
 
-    if (unit === 'day' || unit === 'week') {
-      // Top row: months
-      var cur = startOfMonth(dispStart);
-      while (cur <= dispEnd) {
-        var nm = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-        var x1 = Math.max(xDate(cur), L.LEFT_W);
-        var x2 = Math.min(xDate(nm), L.LEFT_W + chartW);
-        var w = x2 - x1;
-        if (w > 4) {
-          p.push(rect(x1, hY, w, topH, { fill: theme.headerBg, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
-          if (w > 28) {
-            p.push(txt(x1 + w / 2, hY + topH / 2, formatDate(cur, 'MMM YY'), {
-              'font-size': 11, 'font-weight': '600', fill: theme.headerFg,
-              'text-anchor': 'middle', 'dominant-baseline': 'middle',
-              'clip-path': 'url(#gantt-chart)',
-            }));
-          }
-        }
-        cur = nm;
-      }
-      // Bottom row: weeks or days
-      if (unit === 'week') {
-        var ws = startOfWeek(dispStart);
-        while (ws <= dispEnd) {
-          var wx = xDate(ws);
-          var ww = 7 * pxPerDay;
-          var cx1 = Math.max(wx, L.LEFT_W);
-          var cx2 = Math.min(wx + ww, L.LEFT_W + chartW);
-          var cw = cx2 - cx1;
-          if (cw > 2) {
-            p.push(rect(cx1, hY + topH, cw, botH, { fill: theme.headerBg, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
-            if (cw > 22) {
-              p.push(txt(cx1 + cw / 2, hY + topH + botH / 2, formatDate(ws, 'M/D'), {
-                'font-size': 10, fill: theme.headerFg,
-                'text-anchor': 'middle', 'dominant-baseline': 'middle',
-                'clip-path': 'url(#gantt-chart)',
-              }));
-            }
-          }
-          ws = addDays(ws, 7);
-        }
-      } else {
-        var day = new Date(dispStart.getTime());
-        while (day <= dispEnd) {
-          var dx = xDate(day);
-          if (dx >= L.LEFT_W && dx < L.LEFT_W + chartW) {
-            p.push(rect(dx, hY + topH, pxPerDay, botH, { fill: theme.headerBg, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
-            if (pxPerDay > 15) {
-              p.push(txt(dx + pxPerDay / 2, hY + topH + botH / 2, String(day.getDate()), {
-                'font-size': 9, fill: theme.headerFg,
-                'text-anchor': 'middle', 'dominant-baseline': 'middle',
-              }));
-            }
-          }
-          day = addDays(day, 1);
-        }
-      }
-    } else {
-      // month unit: top = year, bottom = months
-      for (var y = dispStart.getFullYear(); y <= dispEnd.getFullYear(); y++) {
-        var ys = new Date(y, 0, 1);
-        var ye = new Date(y + 1, 0, 1);
-        var yx1 = Math.max(xDate(ys), L.LEFT_W);
-        var yx2 = Math.min(xDate(ye), L.LEFT_W + chartW);
-        var yw = yx2 - yx1;
-        if (yw > 4) {
-          p.push(rect(yx1, hY, yw, topH, { fill: theme.headerBg, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
-          if (yw > 20) {
-            p.push(txt(yx1 + yw / 2, hY + topH / 2, String(y), {
+    // ── Row 1: Year ───────────────────────────────────────────────────────────
+    if (showYear) {
+      for (var yr = dispStart.getFullYear(); yr <= dispEnd.getFullYear(); yr++) {
+        var ys = new Date(yr, 0, 1);
+        var ye = new Date(yr + 1, 0, 1);
+        var x1 = Math.max(xDate(ys), leftTotalW);
+        var x2 = Math.min(xDate(ye), leftTotalW + chartW);
+        var yw = x2 - x1;
+        if (yw > 2) {
+          p.push(rect(x1, hy, yw, HROW, { fill: theme.headerBg, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
+          if (yw > 24) {
+            p.push(txt(x1 + yw / 2, hy + HROW / 2, String(yr) + '年', {
               'font-size': 11, 'font-weight': '600', fill: theme.headerFg,
               'text-anchor': 'middle', 'dominant-baseline': 'middle',
               'clip-path': 'url(#gantt-chart)',
@@ -404,35 +376,116 @@
           }
         }
       }
+      hy += HROW;
+    }
+
+    // ── Row 2: Month ──────────────────────────────────────────────────────────
+    if (showMonth) {
       var mc = startOfMonth(dispStart);
       while (mc <= dispEnd) {
-        var mnext = new Date(mc.getFullYear(), mc.getMonth() + 1, 1);
-        var mx1 = Math.max(xDate(mc), L.LEFT_W);
-        var mx2 = Math.min(xDate(mnext), L.LEFT_W + chartW);
-        var mw = mx2 - mx1;
-        if (mw > 4) {
-          p.push(rect(mx1, hY + topH, mw, botH, { fill: theme.headerBg, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
+        var mn = new Date(mc.getFullYear(), mc.getMonth() + 1, 1);
+        var x1 = Math.max(xDate(mc), leftTotalW);
+        var x2 = Math.min(xDate(mn), leftTotalW + chartW);
+        var mw = x2 - x1;
+        if (mw > 2) {
+          p.push(rect(x1, hy, mw, HROW, { fill: theme.headerBg, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
           if (mw > 16) {
-            p.push(txt(mx1 + mw / 2, hY + topH + botH / 2, formatDate(mc, 'M月'), {
+            var mlabel = formatDate(mc, 'M月');
+            p.push(txt(x1 + mw / 2, hy + HROW / 2, mlabel, {
               'font-size': 10, fill: theme.headerFg,
               'text-anchor': 'middle', 'dominant-baseline': 'middle',
               'clip-path': 'url(#gantt-chart)',
             }));
           }
         }
-        mc = mnext;
+        mc = mn;
       }
+      hy += HROW;
+    }
+
+    // ── Row 3: Week ───────────────────────────────────────────────────────────
+    if (showWeek) {
+      var ws = startOfWeek(dispStart);
+      while (ws <= dispEnd) {
+        var wx = xDate(ws);
+        var ww = 7 * pxPerDay;
+        var wcx1 = Math.max(wx, leftTotalW);
+        var wcx2 = Math.min(wx + ww, leftTotalW + chartW);
+        var wcw = wcx2 - wcx1;
+        if (wcw > 2) {
+          p.push(rect(wcx1, hy, wcw, HROW, { fill: theme.headerBg, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
+          if (wcw > 22) {
+            p.push(txt(wcx1 + wcw / 2, hy + HROW / 2, formatDate(ws, 'M/D'), {
+              'font-size': 10, fill: theme.headerFg,
+              'text-anchor': 'middle', 'dominant-baseline': 'middle',
+              'clip-path': 'url(#gantt-chart)',
+            }));
+          }
+        }
+        ws = addDays(ws, 7);
+      }
+      hy += HROW;
+    }
+
+    // ── Row 4: Day ────────────────────────────────────────────────────────────
+    if (showDay) {
+      var dd = new Date(dispStart.getTime());
+      while (dd <= dispEnd) {
+        var ddx = xDate(dd);
+        var dcx1 = Math.max(ddx, leftTotalW);
+        var dcx2 = Math.min(ddx + pxPerDay, leftTotalW + chartW);
+        var dcw = dcx2 - dcx1;
+        if (dcw > 0) {
+          p.push(rect(dcx1, hy, dcw, HROW, { fill: theme.headerBg, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
+          if (dcw > 10) {
+            p.push(txt(dcx1 + dcw / 2, hy + HROW / 2, String(dd.getDate()), {
+              'font-size': 9, fill: theme.headerFg,
+              'text-anchor': 'middle', 'dominant-baseline': 'middle',
+              'clip-path': 'url(#gantt-chart)',
+            }));
+          }
+        }
+        dd = addDays(dd, 1);
+      }
+      hy += HROW;
+    }
+
+    // ── Row 5: 曜日 ───────────────────────────────────────────────────────────
+    if (showDow) {
+      var DAYS_JA = ['日', '月', '火', '水', '木', '金', '土'];
+      var dowd = new Date(dispStart.getTime());
+      while (dowd <= dispEnd) {
+        var dowx = xDate(dowd);
+        var dowcx1 = Math.max(dowx, leftTotalW);
+        var dowcx2 = Math.min(dowx + pxPerDay, leftTotalW + chartW);
+        var dowcw = dowcx2 - dowcx1;
+        if (dowcw > 0) {
+          var dowIdx = dowd.getDay();
+          var cellFill = dowIdx === 6 ? '#ebf8ff' : dowIdx === 0 ? '#fff5f5' : theme.headerBg;
+          var cellFg   = dowIdx === 6 ? '#2b6cb0' : dowIdx === 0 ? '#c53030' : theme.headerFg;
+          p.push(rect(dowcx1, hy, dowcw, HROW, { fill: cellFill, stroke: theme.headerBorder, 'stroke-width': 0.5 }));
+          if (dowcw > 8) {
+            p.push(txt(dowcx1 + dowcw / 2, hy + HROW / 2, DAYS_JA[dowIdx], {
+              'font-size': 9, fill: cellFg,
+              'text-anchor': 'middle', 'dominant-baseline': 'middle',
+              'clip-path': 'url(#gantt-chart)',
+            }));
+          }
+        }
+        dowd = addDays(dowd, 1);
+      }
+      hy += HROW;
     }
 
     // ── Grid lines ────────────────────────────────────────────────────────────
-    var gridTop = L.TITLE_H + L.HEADER_H;
+    var gridTop = L.TITLE_H + headerH;
     var gridBot = svgH;
 
     if (unit === 'week') {
       var gw = startOfWeek(dispStart);
       while (gw <= dispEnd) {
         var gx = xDate(gw);
-        if (gx >= L.LEFT_W) {
+        if (gx >= leftTotalW) {
           p.push(line(gx, gridTop, gx, gridBot, { stroke: theme.gridStroke, 'stroke-width': 1 }));
         }
         gw = addDays(gw, 7);
@@ -441,7 +494,7 @@
       var gmc = startOfMonth(dispStart);
       while (gmc <= dispEnd) {
         var gmx = xDate(gmc);
-        if (gmx >= L.LEFT_W) {
+        if (gmx >= leftTotalW) {
           p.push(line(gmx, gridTop, gmx, gridBot, { stroke: theme.gridStroke, 'stroke-width': 1 }));
         }
         gmc = new Date(gmc.getFullYear(), gmc.getMonth() + 1, 1);
@@ -449,18 +502,16 @@
     } else {
       var gday = new Date(dispStart.getTime());
       while (gday <= dispEnd) {
-        if (gday.getDay() === 1) {
-          var gdx = xDate(gday);
-          if (gdx >= L.LEFT_W) {
-            p.push(line(gdx, gridTop, gdx, gridBot, { stroke: theme.gridStroke, 'stroke-width': 1 }));
-          }
+        var gdx = xDate(gday);
+        if (gdx >= leftTotalW) {
+          p.push(line(gdx, gridTop, gdx, gridBot, { stroke: theme.gridStroke, 'stroke-width': 1 }));
         }
         gday = addDays(gday, 1);
       }
     }
 
     // ── Rows ──────────────────────────────────────────────────────────────────
-    var rowY = L.TITLE_H + L.HEADER_H;
+    var rowY = L.TITLE_H + headerH;
     var taskPos = {}; // id → {x,y,w,h,midY}
 
     rows.forEach(function (row, i) {
@@ -475,7 +526,7 @@
 
         // Background: white + subtle tint in chart area
         p.push(rect(0, rowY, svgW, rh, { fill: theme.rowBg }));
-        p.push(rect(L.LEFT_W, rowY, chartW, rh, { fill: baseColor, 'fill-opacity': 0.07 }));
+        p.push(rect(leftTotalW, rowY, chartW, rh, { fill: baseColor, 'fill-opacity': 0.07 }));
         // Left accent stripe
         p.push(rect(0, rowY, 4, rh, { fill: baseColor }));
         // Bottom separator
@@ -489,7 +540,8 @@
             'dominant-baseline': 'middle', 'clip-path': 'url(#gantt-left)',
           }));
         }
-        p.push(line(L.LEFT_W, rowY, L.LEFT_W, rowY + rh, { stroke: theme.leftBorder, 'stroke-width': 1 }));
+        if (showDates) p.push(line(L.LEFT_W, rowY, L.LEFT_W, rowY + rh, { stroke: theme.leftBorder, 'stroke-width': 1 }));
+        p.push(line(leftTotalW, rowY, leftTotalW, rowY + rh, { stroke: theme.leftBorder, 'stroke-width': 1 }));
 
         // Task bars packed in lanes
         row.assignments.forEach(function (la) {
@@ -502,37 +554,73 @@
           var bh = L.LANE_BAR_H;
           var barMidY = by + bh / 2;
 
-          if (bx + bw >= L.LEFT_W && bx <= L.LEFT_W + chartW) {
+          if (bx + bw >= leftTotalW && bx <= leftTotalW + chartW) {
             p.push(rect(bx, by, bw, bh, {
               rx: L.BAR_R, fill: baseColor,
               'clip-path': 'url(#gantt-chart)',
+              'data-tip': buildTip(t.name, t.start, t.end, t.note),
             }));
             if (bw > 40) {
-              var lx = Math.max(bx + 4, L.LEFT_W + 2);
+              // Label inside bar
+              var lx = Math.max(bx + 4, leftTotalW + 2);
               p.push(txt(lx, barMidY, t.name, {
                 'font-size': 9, fill: theme.taskFg,
                 'dominant-baseline': 'middle',
                 'clip-path': 'url(#gantt-chart)',
+                'pointer-events': 'none',
+              }));
+            } else {
+              // Label below bar (bar too narrow to fit text inside)
+              var cx = bx + bw / 2;
+              p.push(txt(cx, by + bh + 2, t.name, {
+                'font-size': 8, fill: baseColor,
+                'font-weight': '600',
+                'text-anchor': 'middle',
+                'dominant-baseline': 'hanging',
+                'clip-path': 'url(#gantt-chart)',
+                'pointer-events': 'none',
               }));
             }
           }
           taskPos[t.id] = { x: bx, y: by, w: bw, h: bh, midY: barMidY };
         });
 
-        // Milestones: centered in row
+        // Milestones: group by date to stagger same-day milestones vertically
+        var msByDate = {};
         row.milestones.forEach(function (m) {
           if (!m._date) return;
-          var msx = xDate(m._date);
-          if (msx >= L.LEFT_W && msx <= L.LEFT_W + chartW) {
+          var key = m.date;
+          if (!msByDate[key]) msByDate[key] = [];
+          msByDate[key].push(m);
+        });
+        Object.keys(msByDate).forEach(function (dateKey) {
+          var group = msByDate[dateKey];
+          var count = group.length;
+          var step = L.MS_SIZE * 2.2; // vertical gap between stacked diamonds
+          group.forEach(function (m, idx) {
+            var msx = xDate(m._date) + pxPerDay / 2;
+            if (msx < leftTotalW || msx > leftTotalW + chartW) return;
             var s = L.MS_SIZE;
-            p.push('<polygon points="'
-              + msx + ',' + (midY - s) + ' '
-              + (msx + s) + ',' + midY + ' '
-              + msx + ',' + (midY + s) + ' '
-              + (msx - s) + ',' + midY
-              + '" fill="' + theme.msFill + '" stroke="' + theme.msStroke
-              + '" stroke-width="1.5" clip-path="url(#gantt-chart)"/>');
-          }
+            // Center the stack around midY
+            var my = midY + (idx - (count - 1) / 2) * step;
+            p.push(el('polygon', {
+              points: msx+','+(my-s)+' '+(msx+s)+','+my+' '+msx+','+(my+s)+' '+(msx-s)+','+my,
+              fill: theme.msFill, stroke: theme.msStroke, 'stroke-width': 1.5,
+              'clip-path': 'url(#gantt-chart)',
+              'data-tip': buildTip(m.name, m.date, null, m.note),
+            }));
+            // Label rotated -45° from the top tip of the diamond
+            var lx = msx + 3;
+            var ly = my - s - 3;
+            p.push(el('text', {
+              x: lx, y: ly,
+              'font-size': 9, 'font-weight': '600',
+              fill: theme.msFill,
+              'dominant-baseline': 'auto',
+              transform: 'rotate(-45,' + lx + ',' + ly + ')',
+              'clip-path': 'url(#gantt-chart)',
+            }, esc(m.name)));
+          });
         });
 
       } else {
@@ -564,10 +652,20 @@
           }));
         }
 
-        p.push(line(L.LEFT_W, rowY, L.LEFT_W, rowY + rh, { stroke: theme.leftBorder, 'stroke-width': 1 }));
+        if (showDates) p.push(line(L.LEFT_W, rowY, L.LEFT_W, rowY + rh, { stroke: theme.leftBorder, 'stroke-width': 1 }));
+        p.push(line(leftTotalW, rowY, leftTotalW, rowY + rh, { stroke: theme.leftBorder, 'stroke-width': 1 }));
 
         if (row.type === 'task') {
           var t = row.data;
+          if (showDates && t._start && t._end) {
+            var sameDayTask = daysBetween(t._start, t._end) === 0;
+            var dateTxtTask = sameDayTask ? shortDate(t._start) : shortDate(t._start) + '〜' + shortDate(t._end);
+            p.push(txt(L.LEFT_W + L.DATE_COL_W / 2, midY, dateTxtTask, {
+              'font-size': 10, fill: theme.leftFg,
+              'text-anchor': 'middle', 'dominant-baseline': 'middle',
+              'clip-path': 'url(#gantt-date)',
+            }));
+          }
           if (t._start && t._end) {
             var bx = xDate(t._start);
             var dur = Math.max(daysBetween(t._start, t._end), 1);
@@ -577,38 +675,43 @@
             var grp = groupMap[t.group];
             var barColor = (grp && grp.color) || theme.taskBg;
 
-            if (bx + bw >= L.LEFT_W && bx <= L.LEFT_W + chartW) {
+            if (bx + bw >= leftTotalW && bx <= leftTotalW + chartW) {
               p.push(rect(bx, by, bw, bh, {
                 rx: L.BAR_R, fill: barColor,
                 'clip-path': 'url(#gantt-chart)',
+                'data-tip': buildTip(t.name, t.start, t.end, t.note),
               }));
               if (bw > 50) {
-                var lx = Math.max(bx + 5, L.LEFT_W + 3);
+                var lx = Math.max(bx + 5, leftTotalW + 3);
                 p.push(txt(lx, midY, t.name, {
                   'font-size': 10, fill: theme.taskFg,
                   'dominant-baseline': 'middle',
                   'clip-path': 'url(#gantt-chart)',
+                  'pointer-events': 'none',
                 }));
-              }
-              if (t.note) {
-                p.push('<title>' + esc(t.name + ': ' + t.note) + '</title>');
               }
             }
             taskPos[t.id] = { x: bx, y: by, w: bw, h: bh, midY: midY };
           }
         } else if (row.type === 'milestone') {
           var m = row.data;
+          if (showDates && m._date) {
+            p.push(txt(L.LEFT_W + L.DATE_COL_W / 2, midY, shortDate(m._date), {
+              'font-size': 10, fill: theme.msFill,
+              'text-anchor': 'middle', 'dominant-baseline': 'middle',
+              'clip-path': 'url(#gantt-date)',
+            }));
+          }
           if (m._date) {
-            var msx = xDate(m._date);
-            if (msx >= L.LEFT_W && msx <= L.LEFT_W + chartW) {
+            var msx = xDate(m._date) + pxPerDay / 2;
+            if (msx >= leftTotalW && msx <= leftTotalW + chartW) {
               var s = L.MS_SIZE;
-              p.push('<polygon points="'
-                + msx + ',' + (midY - s) + ' '
-                + (msx + s) + ',' + midY + ' '
-                + msx + ',' + (midY + s) + ' '
-                + (msx - s) + ',' + midY
-                + '" fill="' + theme.msFill + '" stroke="' + theme.msStroke
-                + '" stroke-width="1" clip-path="url(#gantt-chart)"/>');
+              p.push(el('polygon', {
+                points: msx+','+(midY-s)+' '+(msx+s)+','+midY+' '+msx+','+(midY+s)+' '+(msx-s)+','+midY,
+                fill: theme.msFill, stroke: theme.msStroke, 'stroke-width': 1,
+                'clip-path': 'url(#gantt-chart)',
+                'data-tip': buildTip(m.name, m.date, null, m.note),
+              }));
             }
           }
         }
@@ -629,7 +732,7 @@
     }
 
     // ── Dependency arrows ─────────────────────────────────────────────────────
-    tasks.forEach(function (t) {
+    if (opts.showArrows) tasks.forEach(function (t) {
       (t.dependencies || []).forEach(function (depId) {
         var src = taskPos[String(depId)];
         var tgt = taskPos[t.id];
@@ -652,9 +755,18 @@
     });
 
     // ── Left panel header cover ───────────────────────────────────────────────
-    p.push(rect(0, L.TITLE_H, L.LEFT_W, L.HEADER_H, { fill: theme.headerBg }));
-    p.push(line(L.LEFT_W, L.TITLE_H, L.LEFT_W, svgH, { stroke: theme.leftBorder, 'stroke-width': 1 }));
-    p.push(line(0, L.TITLE_H + L.HEADER_H - 0.5, L.LEFT_W, L.TITLE_H + L.HEADER_H - 0.5, { stroke: theme.headerBorder, 'stroke-width': 1 }));
+    p.push(rect(0, L.TITLE_H, leftTotalW, headerH, { fill: theme.headerBg }));
+    if (showDates) {
+      p.push(line(L.LEFT_W, L.TITLE_H, L.LEFT_W, svgH, { stroke: theme.leftBorder, 'stroke-width': 1 }));
+      if (headerH > 4) {
+        p.push(txt(L.LEFT_W + L.DATE_COL_W / 2, L.TITLE_H + headerH / 2, '日程', {
+          'font-size': 11, 'font-weight': '600', fill: theme.headerFg,
+          'text-anchor': 'middle', 'dominant-baseline': 'middle',
+        }));
+      }
+    }
+    p.push(line(leftTotalW, L.TITLE_H, leftTotalW, svgH, { stroke: theme.leftBorder, 'stroke-width': 1 }));
+    p.push(line(0, L.TITLE_H + headerH - 0.5, leftTotalW, L.TITLE_H + headerH - 0.5, { stroke: theme.headerBorder, 'stroke-width': 1 }));
 
     p.push('</svg>');
     return p.join('\n');

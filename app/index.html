@@ -37,49 +37,7 @@
       <button class="btn btn-parse" id="btn-parse">▶ 描画</button>
     </div>
 
-    <div class="sidebar-section">
-      <h2>表示設定</h2>
-
-      <div class="form-row">
-        <label for="sel-unit">時間単位</label>
-        <select id="sel-unit">
-          <option value="week" selected>週</option>
-          <option value="month">月</option>
-          <option value="day">日</option>
-        </select>
-      </div>
-
-      <div class="form-row">
-        <label for="sel-theme">カラーテーマ</label>
-        <select id="sel-theme">
-          <option value="blue" selected>ブルー</option>
-          <option value="green">グリーン</option>
-          <option value="warm">ウォーム</option>
-          <option value="dark">ダーク</option>
-        </select>
-      </div>
-
-      <div class="form-row">
-        <label for="sel-layout">レイアウト</label>
-        <select id="sel-layout">
-          <option value="expanded" selected>展開（タスクごとに行）</option>
-          <option value="compact">コンパクト（フェーズごとに行）</option>
-        </select>
-      </div>
-
-      <div class="form-row">
-        <label for="rng-scale">列幅スケール</label>
-        <input type="range" id="rng-scale" min="50" max="300" value="100" step="10">
-        <div class="range-labels"><span>狭い</span><span>広い</span></div>
-      </div>
-    </div>
-
-    <div class="sidebar-section">
-      <h2>エクスポート</h2>
-      <button class="btn btn-export" id="btn-svg">⬇ SVG ダウンロード</button>
-      <button class="btn btn-export" id="btn-html">⬇ HTML ダウンロード</button>
-      <button class="btn btn-export" id="btn-png">⬇ PNG ダウンロード</button>
-    </div>
+    <div id="sidebar-controls"></div>
 
   </aside>
 
@@ -103,14 +61,77 @@
   var currentSpec = null;
   var svgString = '';
 
+  // ── Shared: controls HTML ─────────────────────────────────────────────────
+  // Single source for sidebar settings+export UI.
+  // Pass showHtmlBtn=true for the live app, false for exported HTML.
+  function buildControlsHTML(showHtmlBtn) {
+    return '<div class="sidebar-section"><h2>表示設定</h2>'
+      + '<div class="form-row"><label for="sel-unit">時間単位</label>'
+      + '<select id="sel-unit"><option value="week" selected>週</option><option value="month">月</option><option value="day">日</option></select></div>'
+      + '<div class="form-row"><label for="sel-theme">カラーテーマ</label>'
+      + '<select id="sel-theme"><option value="blue" selected>ブルー</option><option value="green">グリーン</option><option value="warm">ウォーム</option><option value="dark">ダーク</option></select></div>'
+      + '<div class="form-row"><label for="sel-layout">レイアウト</label>'
+      + '<select id="sel-layout"><option value="expanded" selected>展開（タスクごとに行）</option><option value="compact">コンパクト（フェーズごとに行）</option></select></div>'
+      + '<div class="form-row"><label>タイムライン表示</label>'
+      + '<div class="check-group">'
+      + '<label><input type="checkbox" id="chk-year" checked> 年</label>'
+      + '<label><input type="checkbox" id="chk-month" checked> 月</label>'
+      + '<label><input type="checkbox" id="chk-week" checked> 週</label>'
+      + '<label><input type="checkbox" id="chk-day" checked> 日</label>'
+      + '<label><input type="checkbox" id="chk-dow"> 曜日</label>'
+      + '</div></div>'
+      + '<div class="form-row form-row-check"><label><input type="checkbox" id="chk-dates" checked> 日程列を表示</label></div>'
+      + '<div class="form-row form-row-check"><label><input type="checkbox" id="chk-arrows"> 依存関係の矢印を表示</label></div>'
+      + '<div class="form-row"><label for="rng-scale">列幅スケール</label>'
+      + '<input type="range" id="rng-scale" min="50" max="300" value="100" step="10">'
+      + '<div class="range-labels"><span>狭い</span><span>広い</span></div></div>'
+      + '</div>'
+      + '<div class="sidebar-section"><h2>エクスポート</h2>'
+      + '<button class="btn btn-export" id="btn-svg">⬇ SVG ダウンロード</button>'
+      + (showHtmlBtn ? '<button class="btn btn-export" id="btn-html">⬇ HTML ダウンロード</button>' : '')
+      + '<button class="btn btn-export" id="btn-png">⬇ PNG ダウンロード</button>'
+      + '</div>';
+  }
+
+  // Inject into live app sidebar
+  document.getElementById('sidebar-controls').innerHTML = buildControlsHTML(true);
+
+  // ── Shared: IDs that trigger rerender on change ───────────────────────────
+  // Add new option IDs here — live app and exported HTML both pick them up.
+  var CHANGE_IDS = ['sel-theme', 'sel-layout', 'chk-arrows', 'chk-year', 'chk-month', 'chk-week', 'chk-day', 'chk-dow', 'chk-dates'];
+
+  // Pre-fetch sources needed for interactive HTML export.
+  // Works over HTTP; over file:// protocol fetch is blocked (graceful fallback below).
+  var _ganttSrc = null;   // null = loading, '' = failed
+  var _cssSrc   = null;
+  Promise.all([
+    fetch('./gantt.js').then(function (r) { return r.text(); }),
+    fetch('./style.css').then(function (r) { return r.text(); }),
+  ]).then(function (results) {
+    _ganttSrc = results[0];
+    _cssSrc   = results[1];
+  }).catch(function () {
+    _ganttSrc = '';
+    _cssSrc   = '';
+  });
+
   // ── Settings ───────────────────────────────────────────────────────────────
   function getOpts() {
     var unit = document.getElementById('sel-unit').value;
     var theme = document.getElementById('sel-theme').value;
     var scale = parseInt(document.getElementById('rng-scale').value, 10) / 100;
-    var compact = document.getElementById('sel-layout').value === 'compact';
+    var compact    = document.getElementById('sel-layout').value === 'compact';
+    var showArrows = document.getElementById('chk-arrows').checked;
+    var showYear   = document.getElementById('chk-year').checked;
+    var showMonth  = document.getElementById('chk-month').checked;
+    var showWeek   = document.getElementById('chk-week').checked;
+    var showDay    = document.getElementById('chk-day').checked;
+    var showDow    = document.getElementById('chk-dow').checked;
+    var showDates  = document.getElementById('chk-dates').checked;
     var BASE = { day: 24, week: 10, month: 3.8 };
-    return { unit: unit, theme: theme, pxPerDay: BASE[unit] * scale, compact: compact };
+    return { unit: unit, theme: theme, pxPerDay: BASE[unit] * scale, compact: compact,
+             showArrows: showArrows, showYear: showYear, showMonth: showMonth,
+             showWeek: showWeek, showDay: showDay, showDow: showDow, showDates: showDates };
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -195,8 +216,9 @@
     this._userChanged = true;
     rerender();
   });
-  document.getElementById('sel-theme').addEventListener('change', rerender);
-  document.getElementById('sel-layout').addEventListener('change', rerender);
+  CHANGE_IDS.forEach(function (id) {
+    document.getElementById(id).addEventListener('change', rerender);
+  });
   document.getElementById('rng-scale').addEventListener('input', rerender);
 
   // ── Export helpers ────────────────────────────────────────────────────────
@@ -222,16 +244,101 @@
     download(currentFilename() + '.svg', new Blob([svgString], { type: 'image/svg+xml' }));
   });
 
-  // HTML export (self-contained)
+  // HTML export (interactive)
   document.getElementById('btn-html').addEventListener('click', function () {
-    if (!svgString) return showStatus('先にYAMLを読み込んでください', true);
-    var html = '<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">'
-      + '<title>' + (currentSpec ? currentSpec.title : 'Gantt') + '</title>'
-      + '<style>body{margin:0;background:#f0f4f8;display:flex;justify-content:center;padding:20px}'
-      + '.wrap{background:#fff;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.12);overflow:auto;display:inline-block}</style>'
-      + '</head><body><div class="wrap">' + svgString + '</div></body></html>';
+    if (!currentSpec) return showStatus('先にYAMLを読み込んでください', true);
+    if (_ganttSrc === null) return showStatus('ソース読み込み中です。少し待ってから再試行してください', true);
+    if (_ganttSrc === '') return showStatus('インタラクティブHTMLの出力にはHTTPサーバーが必要です（例: python -m http.server）', true);
+    var html = buildInteractiveHTML(currentSpec, getOpts(), _ganttSrc, _cssSrc);
     download(currentFilename() + '.html', new Blob([html], { type: 'text/html' }));
   });
+
+  function buildInteractiveHTML(spec, opts, ganttSrc, cssSrc) {
+    function he(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    var title = he(spec.title || 'Gantt Chart');
+    var specJson  = JSON.stringify(spec);
+    var optsJson  = JSON.stringify({
+      unit: opts.unit, theme: opts.theme,
+      compact: !!opts.compact, showArrows: !!opts.showArrows,
+      showYear: opts.showYear !== false,
+      showMonth: opts.showMonth !== false,
+      showWeek: opts.showWeek !== false,
+      showDay: opts.showDay !== false,
+      showDow: !!opts.showDow,
+      showDates: opts.showDates !== false,
+      pxPerDay: opts.pxPerDay,
+    });
+
+    // Embed shared functions and constants directly — no duplication
+    var appScript = [
+      '(function(){',
+      '"use strict";',
+      // Inject controls HTML — same source as live app (buildControlsHTML(false))
+      'document.getElementById("sidebar-controls").innerHTML=' + JSON.stringify(buildControlsHTML(false)) + ';',
+      'var SPEC=' + specJson + ';',
+      'var INIT=' + optsJson + ';',
+      'var CHANGE_IDS=' + JSON.stringify(CHANGE_IDS) + ';',
+      'var svg="";',
+      'var BASE={day:24,week:10,month:3.8};',
+      getOpts.toString() + ';',           // shared — no duplication
+      'function render(){svg=GanttChart.render(SPEC,getOpts());document.getElementById("chart-wrap").innerHTML=svg;}',
+      'document.getElementById("sel-unit").value=INIT.unit||"week";',
+      'document.getElementById("sel-theme").value=INIT.theme||"blue";',
+      'document.getElementById("sel-layout").value=INIT.compact?"compact":"expanded";',
+      'document.getElementById("chk-arrows").checked=!!INIT.showArrows;',
+      'document.getElementById("chk-year").checked=INIT.showYear!==false;',
+      'document.getElementById("chk-month").checked=INIT.showMonth!==false;',
+      'document.getElementById("chk-week").checked=INIT.showWeek!==false;',
+      'document.getElementById("chk-day").checked=INIT.showDay!==false;',
+      'document.getElementById("chk-dow").checked=!!INIT.showDow;',
+      'document.getElementById("chk-dates").checked=INIT.showDates!==false;',
+      'document.getElementById("rng-scale").value=Math.round((INIT.pxPerDay/(BASE[INIT.unit||"week"]))*100)||100;',
+      'document.getElementById("sel-unit").addEventListener("change",render);',
+      'CHANGE_IDS.forEach(function(id){document.getElementById(id).addEventListener("change",render);});',
+      'document.getElementById("rng-scale").addEventListener("input",render);',
+      '  function fname(){return(SPEC.title||"gantt").replace(/[\\/:*?"<>|]/g,"_");}',
+      '  function dl(name,blob){var u=URL.createObjectURL(blob);var a=document.createElement("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(u);document.body.removeChild(a);},1000);}',
+      '  document.getElementById("btn-svg").addEventListener("click",function(){if(svg)dl(fname()+".svg",new Blob([svg],{type:"image/svg+xml"}));});',
+      '  document.getElementById("btn-png").addEventListener("click",function(){',
+      '    var el=document.querySelector("#chart-wrap svg");if(!el)return;',
+      '    var W=parseFloat(el.getAttribute("width")),H=parseFloat(el.getAttribute("height"));',
+      '    var c=document.createElement("canvas");c.width=W*2;c.height=H*2;',
+      '    var ctx=c.getContext("2d");ctx.scale(2,2);',
+      '    var b=new Blob([svg],{type:"image/svg+xml;charset=utf-8"});',
+      '    var u=URL.createObjectURL(b);var img=new Image();',
+      '    img.onload=function(){ctx.drawImage(img,0,0,W,H);URL.revokeObjectURL(u);c.toBlob(function(pb){dl(fname()+".png",pb);},"image/png");};',
+      '    img.src=u;',
+      '  });',
+      '  var tip=document.getElementById("tooltip");',
+      '  document.getElementById("chart-wrap").addEventListener("mouseover",function(e){var t=e.target.getAttribute("data-tip");if(!t)return;tip.textContent=t;tip.style.display="block";});',
+      '  document.getElementById("chart-wrap").addEventListener("mousemove",function(e){if(tip.style.display!=="block")return;var x=e.clientX+14,y=e.clientY-10;if(x+tip.offsetWidth>window.innerWidth-8)x=e.clientX-tip.offsetWidth-14;if(y+tip.offsetHeight>window.innerHeight-8)y=e.clientY-tip.offsetHeight-10;tip.style.left=x+"px";tip.style.top=y+"px";});',
+      '  document.getElementById("chart-wrap").addEventListener("mouseout",function(e){if(e.target.getAttribute("data-tip"))tip.style.display="none";});',
+      '  render();',
+      '})();',
+    ].join('\n');
+
+    return '<!DOCTYPE html>\n'
+      + '<html lang="ja">\n<head>\n'
+      + '<meta charset="UTF-8">\n'
+      + '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+      + '<title>' + title + '</title>\n'
+      + '<style>\n' + cssSrc + '\n</style>\n'
+      + '</head>\n<body>\n'
+      + '<header class="app-header">\n'
+      + '  <h1>📅 ' + title + '</h1>\n'
+      + '  <span class="subtitle">インタラクティブガントチャート</span>\n'
+      + '</header>\n'
+      + '<div class="app-body">\n'
+      + '  <aside class="sidebar"><div id="sidebar-controls"></div></aside>\n'
+      + '  <main class="chart-area"><div class="chart-wrap" id="chart-wrap"></div></main>\n'
+      + '</div>\n'
+      + '<div id="tooltip"></div>\n'
+      + '<script>\n' + ganttSrc + '\n</' + 'script>\n'
+      + '<script>\n' + appScript + '\n</' + 'script>\n'
+      + '</body>\n</html>';
+  }
 
   // PNG export via Canvas
   document.getElementById('btn-png').addEventListener('click', function () {
@@ -267,6 +374,36 @@
     img.src = url;
   });
 
+})();
+</script>
+
+<div id="tooltip"></div>
+
+<script>
+(function () {
+  var tip = document.getElementById('tooltip');
+
+  document.getElementById('chart-wrap').addEventListener('mouseover', function (e) {
+    var text = e.target.getAttribute('data-tip');
+    if (!text) return;
+    tip.textContent = text;
+    tip.style.display = 'block';
+  });
+
+  document.getElementById('chart-wrap').addEventListener('mousemove', function (e) {
+    if (tip.style.display !== 'block') return;
+    var x = e.clientX + 14;
+    var y = e.clientY - 10;
+    // Keep tooltip inside viewport
+    if (x + tip.offsetWidth > window.innerWidth - 8) x = e.clientX - tip.offsetWidth - 14;
+    if (y + tip.offsetHeight > window.innerHeight - 8) y = e.clientY - tip.offsetHeight - 10;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+  });
+
+  document.getElementById('chart-wrap').addEventListener('mouseout', function (e) {
+    if (e.target.getAttribute('data-tip')) tip.style.display = 'none';
+  });
 })();
 </script>
 
